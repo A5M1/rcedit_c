@@ -161,8 +161,8 @@ static void versioninfo_deserialize_stringtable(const unsigned char* offset, siz
     *out_table_count = count;
 }
 
-VersionInfo* vinfo_create_from_module(HMODULE hModule, WORD lang) {
-    HRSRC hRsrc = FindResourceExW(hModule, RT_VERSION, MAKEINTRESOURCEW(1), lang);
+VersionInfo* vinfo_create_from_module(HMODULE hModule, UINT id, WORD lang) {
+    HRSRC hRsrc = FindResourceExW(hModule, RT_VERSION, MAKEINTRESOURCEW(id), lang);
     if (!hRsrc)
         return NULL;
     HGLOBAL hGlobal = LoadResource(hModule, hRsrc);

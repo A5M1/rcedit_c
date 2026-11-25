@@ -9,7 +9,7 @@
 enum {
     OPTION_OK = 0,
     OPTION_ERROR = 1,
-    OPTION_DONE = 2,
+    OPTION_CHANGED = 2,
 };
 
 typedef int (*OptionHandler)(ResourceUpdater* ru, wchar_t* args[]);
@@ -51,7 +51,7 @@ static int handle_set_file_version(ResourceUpdater* ru, wchar_t* args[]) {
         fwprintf(stderr, L"Unable to change FileVersion string\n");
         return OPTION_ERROR;
     }
-    return OPTION_OK;
+    return OPTION_CHANGED;
 }
 
 static int handle_set_product_version(ResourceUpdater* ru, wchar_t* args[]) {
@@ -68,15 +68,33 @@ static int handle_set_product_version(ResourceUpdater* ru, wchar_t* args[]) {
         fwprintf(stderr, L"Unable to change ProductVersion string\n");
         return OPTION_ERROR;
     }
-    return OPTION_OK;
+    return OPTION_CHANGED;
 }
 
 static int handle_set_version_string(ResourceUpdater* ru, wchar_t* args[]) {
-    if (!ru_set_version_string(ru, args[0], args[1])) {
+    const wchar_t* key = args[0];
+    const wchar_t* value = args[1];
+
+    unsigned short v1, v2, v3, v4;
+    if (parse_version_string(value, &v1, &v2, &v3, &v4)) {
+        if (wcscmp(key, L"FileVersion") == 0) {
+            if (!ru_set_file_version(ru, v1, v2, v3, v4)) {
+                fwprintf(stderr, L"Unable to change file version\n");
+                return OPTION_ERROR;
+            }
+        } else if (wcscmp(key, L"ProductVersion") == 0) {
+            if (!ru_set_product_version(ru, v1, v2, v3, v4)) {
+                fwprintf(stderr, L"Unable to change product version\n");
+                return OPTION_ERROR;
+            }
+        }
+    }
+
+    if (!ru_set_version_string(ru, key, value)) {
         fwprintf(stderr, L"Unable to change version string\n");
         return OPTION_ERROR;
     }
-    return OPTION_OK;
+    return OPTION_CHANGED;
 }
 
 static int handle_get_version_string(ResourceUpdater* ru, wchar_t* args[]) {
@@ -87,7 +105,7 @@ static int handle_get_version_string(ResourceUpdater* ru, wchar_t* args[]) {
     }
     fwprintf(stdout, L"%s", result);
     free(result);
-    return OPTION_DONE;
+    return OPTION_OK;
 }
 
 static int handle_set_icon(ResourceUpdater* ru, wchar_t* args[]) {
@@ -95,7 +113,7 @@ static int handle_set_icon(ResourceUpdater* ru, wchar_t* args[]) {
         fwprintf(stderr, L"Unable to set icon\n");
         return OPTION_ERROR;
     }
-    return OPTION_OK;
+    return OPTION_CHANGED;
 }
 
 static int handle_application_manifest(ResourceUpdater* ru, wchar_t* args[]) {
@@ -105,7 +123,7 @@ static int handle_application_manifest(ResourceUpdater* ru, wchar_t* args[]) {
         fwprintf(stderr, L"Unable to set application manifest\n");
         return OPTION_ERROR;
     }
-    return OPTION_OK;
+    return OPTION_CHANGED;
 }
 
 static int handle_set_execution_level(ResourceUpdater* ru, wchar_t* args[]) {
@@ -115,7 +133,7 @@ static int handle_set_execution_level(ResourceUpdater* ru, wchar_t* args[]) {
         fwprintf(stderr, L"Unable to set execution level\n");
         return OPTION_ERROR;
     }
-    return OPTION_OK;
+    return OPTION_CHANGED;
 }
 
 static int handle_set_resource_string(ResourceUpdater* ru, wchar_t* args[]) {
@@ -128,7 +146,7 @@ static int handle_set_resource_string(ResourceUpdater* ru, wchar_t* args[]) {
         fwprintf(stderr, L"Unable to change string\n");
         return OPTION_ERROR;
     }
-    return OPTION_OK;
+    return OPTION_CHANGED;
 }
 
 static int handle_get_resource_string(ResourceUpdater* ru, wchar_t* args[]) {
@@ -143,7 +161,7 @@ static int handle_get_resource_string(ResourceUpdater* ru, wchar_t* args[]) {
         return OPTION_ERROR;
     }
     fwprintf(stdout, L"%s", result);
-    return OPTION_DONE;
+    return OPTION_OK;
 }
 
 static int handle_set_rcdata(ResourceUpdater* ru, wchar_t* args[]) {
@@ -156,7 +174,7 @@ static int handle_set_rcdata(ResourceUpdater* ru, wchar_t* args[]) {
         fwprintf(stderr, L"Unable to change RCDATA\n");
         return OPTION_ERROR;
     }
-    return OPTION_OK;
+    return OPTION_CHANGED;
 }
 
 static const OptionSpec kOptions[] = {
@@ -194,6 +212,7 @@ int wmain(int argc, wchar_t* argv[]) {
         return 1;
     }
 
+    int dirty = 0;
     for (int i = 2; i < argc;) {
         if (is_help(argv[i])) {
             print_help(argv[0]);
@@ -215,15 +234,17 @@ int wmain(int argc, wchar_t* argv[]) {
         }
 
         int status = option->handler(&ru, &argv[i + 1]);
-        if (status != OPTION_OK) {
+        if (status == OPTION_ERROR) {
             ru_free(&ru);
-            return status == OPTION_DONE ? 0 : 1;
+            return 1;
         }
+        if (status == OPTION_CHANGED)
+            dirty = 1;
 
         i += 1 + option->argCount;
     }
 
-    if (!ru_commit(&ru)) {
+    if (dirty && !ru_commit(&ru)) {
         fwprintf(stderr, L"Failed to commit updates\n");
         ru_free(&ru);
         return 1;

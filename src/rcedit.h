@@ -82,6 +82,7 @@ typedef struct {
 
 typedef struct {
     WORD wLanguage;
+    UINT id;
     int hasFixed;
     VS_FIXEDFILEINFO fixedInfo;
     VersionStringTable* tables;
@@ -218,6 +219,8 @@ typedef struct ResourceUpdater {
     wchar_t* originalExecutionLevel;
     wchar_t* applicationManifestPath;
     wchar_t* manifestString;
+    WORD manifestLang;
+    UINT manifestId;
     VersionStampMap versionStampMap;
     StringTableMap stringTableMap;
     IconTableMap iconBundleMap;
@@ -241,7 +244,7 @@ void itable_free(IconTableMap* m);
 void versioninfo_init(VersionInfo* v);
 void versioninfo_free(VersionInfo* v);
 unsigned char* versioninfo_serialize(const VersionInfo* vi, size_t* outSize);
-VersionInfo* vinfo_create_from_module(HMODULE hModule, WORD lang);
+VersionInfo* vinfo_create_from_module(HMODULE hModule, UINT id, WORD lang);
 
 void ru_init(ResourceUpdater* ru);
 void ru_free(ResourceUpdater* ru);

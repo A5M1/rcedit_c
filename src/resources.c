@@ -9,6 +9,8 @@ static BOOL CALLBACK on_enum_lang(HMODULE hModule, LPCWSTR lpszType, LPCWSTR lps
                                   LONG_PTR lParam);
 static BOOL CALLBACK on_enum_name(HMODULE hModule, LPCWSTR lpszType, LPWSTR lpszName, LONG_PTR lParam);
 static BOOL CALLBACK on_enum_manifest(HMODULE hModule, LPCTSTR lpType, LPWSTR lpName, LONG_PTR lParam);
+static BOOL CALLBACK on_enum_manifest_lang(HMODULE hModule, LPCWSTR lpType, LPCWSTR lpName, WORD wIDLanguage,
+                                           LONG_PTR lParam);
 
 void ru_init(ResourceUpdater* ru) {
     ru->module = NULL;
@@ -17,6 +19,8 @@ void ru_init(ResourceUpdater* ru) {
     ru->originalExecutionLevel = NULL;
     ru->applicationManifestPath = NULL;
     ru->manifestString = NULL;
+    ru->manifestLang = MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US);
+    ru->manifestId = 1;
     vsm_init(&ru->versionStampMap);
     stm_init(&ru->stringTableMap);
     itable_init(&ru->iconBundleMap);
@@ -295,7 +299,10 @@ int ru_change_rcdata(ResourceUpdater* ru, unsigned int id, const wchar_t* path) 
             if (entry->id == (ptrdiff_t)id) {
                 bytevec_free(&entry->data);
                 bytevec_init(&entry->data);
-                bytevec_reserve(&entry->data, rsize);
+                if (!bytevec_reserve(&entry->data, rsize)) {
+                    free(rbuf);
+                    return 0;
+                }
                 memcpy(entry->data.data, rbuf, rsize);
                 entry->data.size = rsize;
                 free(rbuf);
@@ -303,9 +310,55 @@ int ru_change_rcdata(ResourceUpdater* ru, unsigned int id, const wchar_t* path) 
             }
         }
     }
+
+    WORD lang = (ru->rcDataLngMap.count == 0) ? RCEDIT_LANG_EN_US : ru->rcDataLngMap.entries[0].lang;
+    RcDataLangEntry* langEntry = NULL;
+    for (size_t i = 0; i < ru->rcDataLngMap.count; ++i) {
+        if (ru->rcDataLngMap.entries[i].lang == lang) {
+            langEntry = &ru->rcDataLngMap.entries[i];
+            break;
+        }
+    }
+    if (!langEntry) {
+        if (ru->rcDataLngMap.count + 1 > ru->rcDataLngMap.capacity) {
+            size_t newcap = (ru->rcDataLngMap.capacity == 0) ? 4 : ru->rcDataLngMap.capacity * 2;
+            RcDataLangEntry* tmp = realloc(ru->rcDataLngMap.entries, newcap * sizeof(RcDataLangEntry));
+            if (!tmp) {
+                free(rbuf);
+                return 0;
+            }
+            ru->rcDataLngMap.entries = tmp;
+            ru->rcDataLngMap.capacity = newcap;
+        }
+        langEntry = &ru->rcDataLngMap.entries[ru->rcDataLngMap.count++];
+        langEntry->lang = lang;
+        langEntry->entries = NULL;
+        langEntry->count = 0;
+        langEntry->capacity = 0;
+    }
+
+    if (langEntry->count + 1 > langEntry->capacity) {
+        size_t newcap = (langEntry->capacity == 0) ? 4 : langEntry->capacity * 2;
+        RcDataEntry* tmp = realloc(langEntry->entries, newcap * sizeof(RcDataEntry));
+        if (!tmp) {
+            free(rbuf);
+            return 0;
+        }
+        langEntry->entries = tmp;
+        langEntry->capacity = newcap;
+    }
+    RcDataEntry* entry = &langEntry->entries[langEntry->count];
+    entry->id = (ptrdiff_t)id;
+    bytevec_init(&entry->data);
+    if (!bytevec_reserve(&entry->data, rsize)) {
+        free(rbuf);
+        return 0;
+    }
+    memcpy(entry->data.data, rbuf, rsize);
+    entry->data.size = rsize;
+    langEntry->count++;
     free(rbuf);
-    fwprintf(stderr, L"Cannot find RCDATA with id '%u'\n", id);
-    return 0;
+    return 1;
 }
 
 int ru_change_string(ResourceUpdater* ru, unsigned int id, const wchar_t* value) {
@@ -449,7 +502,7 @@ int ru_commit(ResourceUpdater* ru) {
         unsigned char* buf = versioninfo_serialize(&vi, &outSize);
         versioninfo_free(&vi);
         if (buf) {
-            if (!UpdateResourceW(hUpdate, RT_VERSION, MAKEINTRESOURCEW(1), e->wLanguage, buf, (DWORD)outSize)) {
+            if (!UpdateResourceW(hUpdate, RT_VERSION, MAKEINTRESOURCEW(e->id), e->wLanguage, buf, (DWORD)outSize)) {
                 EndUpdateResourceW(hUpdate, TRUE);
                 free(buf);
                 return 0;
@@ -545,8 +598,8 @@ int ru_commit(ResourceUpdater* ru) {
             EndUpdateResourceW(hUpdate, TRUE);
             return 0;
         }
-        if (!UpdateResourceW(hUpdate, RT_MANIFEST, MAKEINTRESOURCEW(1), MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US),
-                             mbuf, (DWORD)msize)) {
+        if (!UpdateResourceW(hUpdate, RT_MANIFEST, MAKEINTRESOURCEW(ru->manifestId), ru->manifestLang, mbuf,
+                             (DWORD)msize)) {
             free(mbuf);
             EndUpdateResourceW(hUpdate, TRUE);
             return 0;
@@ -576,9 +629,8 @@ int ru_commit(ResourceUpdater* ru) {
                         int utf8Len = WideCharToMultiByte(CP_UTF8, 0, outw, -1, NULL, 0, NULL, NULL);
                         char* outbuf = malloc(utf8Len);
                         WideCharToMultiByte(CP_UTF8, 0, outw, -1, outbuf, utf8Len, NULL, NULL);
-                        if (!UpdateResourceW(hUpdate, RT_MANIFEST, MAKEINTRESOURCEW(1),
-                                             MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US), outbuf,
-                                             (DWORD)(utf8Len - 1))) {
+                        if (!UpdateResourceW(hUpdate, RT_MANIFEST, MAKEINTRESOURCEW(ru->manifestId), ru->manifestLang,
+                                             outbuf, (DWORD)(utf8Len - 1))) {
                             free(outbuf);
                             free(outw);
                             free(newManifest);
@@ -598,6 +650,17 @@ int ru_commit(ResourceUpdater* ru) {
 }
 
 const wchar_t* ru_get_version_string(ResourceUpdater* ru, const wchar_t* key) {
+    for (size_t i = 0; i < ru->versionStampMap.count; ++i) {
+        VersionStampMapEntry* e = &ru->versionStampMap.entries[i];
+        for (size_t t = 0; t < e->count; ++t) {
+            VersionStringTable* table = &e->tables[t];
+            for (size_t s = 0; s < table->count; ++s) {
+                if (wcscmp(table->strings[s].key, key) == 0)
+                    return _wcsdup(table->strings[s].value);
+            }
+        }
+    }
+
     DWORD handle = 0;
     DWORD size = GetFileVersionInfoSizeW(ru->filename, &handle);
     if (size == 0)
@@ -721,8 +784,14 @@ static BOOL CALLBACK on_enum_name(HMODULE hModule, LPCWSTR lpszType, LPWSTR lpsz
 }
 
 static BOOL CALLBACK on_enum_manifest(HMODULE hModule, LPCTSTR lpType, LPWSTR lpName, LONG_PTR lParam) {
+    EnumResourceLanguagesW(hModule, lpType, lpName, on_enum_manifest_lang, lParam);
+    return TRUE;
+}
+
+static BOOL CALLBACK on_enum_manifest_lang(HMODULE hModule, LPCWSTR lpType, LPCWSTR lpName, WORD wIDLanguage,
+                                           LONG_PTR lParam) {
     ResourceUpdater* instance = (ResourceUpdater*)lParam;
-    HRSRC hResInfo = FindResourceW(hModule, lpName, lpType);
+    HRSRC hResInfo = FindResourceExW(hModule, lpType, lpName, wIDLanguage);
     if (!hResInfo)
         return TRUE;
 
@@ -760,9 +829,12 @@ static BOOL CALLBACK on_enum_manifest(HMODULE hModule, LPCTSTR lpType, LPWSTR lp
     }
     free(instance->manifestString);
     instance->manifestString = manifestStringLocal;
+    instance->manifestLang = wIDLanguage;
+    if (IS_INTRESOURCE(lpName))
+        instance->manifestId = (UINT)(uintptr_t)lpName;
     UnlockResource(hResData);
     FreeResource(hResData);
-    return TRUE;
+    return FALSE;
 }
 
 static BOOL CALLBACK on_enum_lang(HMODULE hModule, LPCWSTR lpszType, LPCWSTR lpszName, WORD wIDLanguage,
@@ -772,11 +844,12 @@ static BOOL CALLBACK on_enum_lang(HMODULE hModule, LPCWSTR lpszType, LPCWSTR lps
         intptr_t type = (intptr_t)lpszType;
         switch (type) {
         case (intptr_t)RT_VERSION: {
-            VersionInfo* vi = vinfo_create_from_module(hModule, wIDLanguage);
+            UINT versionId = (UINT)(uintptr_t)lpszName;
+            VersionInfo* vi = vinfo_create_from_module(hModule, versionId, wIDLanguage);
             if (vi) {
                 VersionStampMapEntry* e = vsm_get_or_create(&instance->versionStampMap, wIDLanguage);
                 if (e) {
-
+                    e->id = versionId;
                     e->hasFixed = vi->has_fixed;
                     if (vi->has_fixed)
                         e->fixedInfo = vi->fixedInfo;

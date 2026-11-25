@@ -61,14 +61,14 @@ Run with `-h` or `--help` to print the built-in help.
 | --- | --- | --- | --- |
 | `--set-file-version` | `-sfv` | `<version>` | Set the file version and the `FileVersion` string |
 | `--set-product-version` | `-spv` | `<version>` | Set the product version and the `ProductVersion` string |
-| `--set-version-string` | `-svs` | `<key> <value>` | Set a version string |
+| `--set-version-string` | `-svs` | `<key> <value>` | Set a version string; updates fixed info for `FileVersion`/`ProductVersion` |
 | `--get-version-string` | `-gvs` | `<key>` | Print a version string |
 | `--set-icon` | `-si` | `<path>` | Replace the application icon |
 | `--set-requested-execution-level` | `-srel` | `<level>` | Set `requestedExecutionLevel` |
 | `--application-manifest` | `-am` | `<path>` | Replace the application manifest |
 | `--set-resource-string` | `--srs` | `<id> <value>` | Set an `RT_STRING` entry |
 | `--get-resource-string` | `-grs` | `<id>` | Print an `RT_STRING` entry |
-| `--set-rcdata` | | `<id> <path>` | Replace an existing `RT_RCDATA` resource |
+| `--set-rcdata` | | `<id> <path>` | Set or replace an `RT_RCDATA` resource |
 
 `--set-requested-execution-level` accepts `asInvoker`, `highestAvailable`, or `requireAdministrator`.
 
@@ -99,7 +99,7 @@ Replace the manifest:
 rcedit.exe app.exe --application-manifest app.manifest
 ```
 
-Update a string table entry and an existing RCDATA resource:
+Update a string table entry and an RCDATA resource:
 
 ```sh
 rcedit.exe app.exe --set-resource-string 7 "New string"
@@ -147,13 +147,13 @@ The tests build `tests/test_prog.exe`, modify its version and manifest, then ver
     └── test_prog.rc
 ```
 
-## Notes and limitations
+## Notes
 
-- The version resource is written as resource ID `1`.
-- Manifests are written under language `1033` (en-US).
-- `--set-rcdata` only replaces an ID that already exists in the file.
-- Get operations return immediately without committing changes.
-- `--set-version-string` changes only the string value; use `--set-file-version` or `--set-product-version` to also update the fixed version info.
+- Existing version resource IDs, manifest IDs, and manifest languages are preserved.
+- New version resources use ID `1`; new manifests use ID `1` and language `1033` (en-US).
+- `--set-rcdata` replaces an existing resource or creates a new one under the file's default language.
+- Get options can be combined with set options. If only get options are used, the file is not modified.
+- `--set-version-string` updates the fixed file/product version when the key is `FileVersion` or `ProductVersion` and the value parses as a version.
 
 ## License
 

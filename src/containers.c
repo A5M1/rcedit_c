@@ -88,6 +88,7 @@ VersionStampMapEntry* vsm_get_or_create(VersionStampMap* m, WORD lang) {
     }
     VersionStampMapEntry* e = &m->entries[m->count++];
     e->wLanguage = lang;
+    e->id = 1;
     e->count = 0;
     e->capacity = 0;
     e->tables = NULL;
